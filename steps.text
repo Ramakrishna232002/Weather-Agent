@@ -1,0 +1,22 @@
+# Create Virtual Environment
+ python3.11 -m venv venv311
+
+# Activate it
+
+# On Windows:
+venv\Scripts\activate
+# On macOS/Linux:
+source venv311/bin/activate
+
+# requirement.txt installation 
+pip install -r requirements.txt
+pip list - to check the list 
+
+- Check if Ollama service is running
+ollama serve
+
+If Ollama is not running, start it: ollama serve &
+
+Run Backend: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+run frontend: python3 -m http.server 3000
+

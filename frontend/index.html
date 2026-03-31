@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent for Crop and Weather</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <div class="app-wrapper">
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Header with Logo and Download -->
+            <div class="header-section">
+                <div class="logo-container">
+                    <div class="logo-icon">
+                        <i class="fas fa-leaf"></i>
+                    </div>
+                    <div class="logo-text">
+                        <h1>AI Agent for Crop and Weather</h1>
+                        <p>Personal Assistant</p>
+                    </div>
+                </div>
+                <button class="download-button" id="downloadBtn">
+                    <i class="fas fa-download"></i>
+                    <span>Download Report</span>
+                </button>
+            </div>
+
+            <!-- Search Bar -->
+            <div class="search-section">
+                <div class="search-container">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" id="queryInput" class="search-input" 
+                        placeholder="Ask me anything about weather, crops, farming..." 
+                        autocomplete="off">
+                    <button id="submitBtn" class="ask-button">
+                        <span>Ask</span>
+                        <i class="fas fa-arrow-right"></i>
+                    </button>
+                </div>
+                <div class="input-methods">
+                    <button class="method-btn active" data-method="text">
+                        <i class="fas fa-keyboard"></i> Text
+                    </button>
+                    <button class="method-btn" data-method="voice">
+                        <i class="fas fa-microphone"></i> Voice
+                    </button>
+                </div>
+                <div id="voiceArea" class="voice-area hidden">
+                    <button id="recordBtn" class="record-btn">
+                        <i class="fas fa-microphone"></i> Start Recording
+                    </button>
+                    <div id="voiceWave" class="voice-wave"></div>
+                    <p id="voiceStatus" class="voice-status"></p>
+                </div>
+            </div>
+
+            <!-- AI Response Area -->
+            <div id="responseArea" class="response-area">
+                <div class="greeting-message">
+                    <div class="greeting-icon">🌾</div>
+                    <h3>Hello, Farmer!</h3>
+                    <p>How can I assist you today? Ask me about weather, crops, or farming practices.</p>
+                </div>
+            </div>
+
+            <!-- Weather Display Area (Dynamic) -->
+            <div id="weatherDisplay" class="weather-display hidden"></div>
+
+            <!-- Loading -->
+            <div id="loading" class="loading-spinner hidden">
+                <div class="spinner"></div>
+                <p>Analyzing your query...</p>
+            </div>
+
+            <!-- Error -->
+            <div id="errorMsg" class="error-message hidden"></div>
+        </div>
+
+        <!-- Right Sidebar - History -->
+        <div class="history-sidebar">
+            <div class="history-header">
+                <i class="fas fa-history"></i>
+                <h3>Recent Searches</h3>
+                <button id="clearHistoryBtn" class="clear-history">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
+            </div>
+            <div id="historyList" class="history-list">
+                <div class="empty-history">
+                    <i class="fas fa-inbox"></i>
+                    <p>No recent searches</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/src/main.js"></script>
+</body>
+</html>
