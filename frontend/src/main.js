@@ -114,13 +114,53 @@ function showError(message) {
     setTimeout(() => errorMsg.classList.add('hidden'), 5000);
 }
 
+// ==================== IMPROVED AI RESPONSE FORMATTING ====================
+
 function formatAIResponse(text) {
     if (!text) return '';
+    
     let formatted = text;
+    
+    // Convert **bold** to <strong>
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert bullet points (• or - at start of line)
+    formatted = formatted.replace(/^[•\-]\s+(.*?)$/gm, '<li>$1</li>');
+    formatted = formatted.replace(/(<li>.*?<\/li>)/gs, '<ul>$1</ul>');
+    
+    // Convert CROP headings (doesn't affect weather responses)
+    formatted = formatted.replace(/CROP \d+:/g, '<strong class="crop-heading">$&</strong>');
+    
+    // Convert line breaks
     formatted = formatted.replace(/\n/g, '<br>');
+    
     return formatted;
 }
+
+function displayAIResponse(response, locationData = null) {
+    let html = '';
+    
+    // Show location card only if location data is provided (for non-weather responses)
+    if (locationData && locationData.location_name) {
+        html += `
+            <div class="location-card">
+                <div class="location-icon"><i class="fas fa-map-marker-alt"></i></div>
+                <div class="location-details">
+                    <h4>${escapeHtml(locationData.location_name)}</h4>
+                    ${locationData.latitude ? `<p>📍 ${locationData.latitude}, ${locationData.longitude}</p>` : ''}
+                </div>
+            </div>
+        `;
+    }
+    
+    // Format and show AI response
+    const formattedResponse = formatAIResponse(response);
+    html += `<div class="ai-response-text">${formattedResponse}</div>`;
+    
+    responseArea.innerHTML = html;
+}
+
+// ==================== WEATHER FUNCTIONS (UNCHANGED) ====================
 
 function getWeatherIcon(description) {
     const desc = description.toLowerCase();
@@ -276,10 +316,6 @@ function displayWeather(weatherData) {
     weatherDisplay.style.display = 'block';
 }
 
-function displayAIResponse(response) {
-    responseArea.innerHTML = `<div class="ai-response-text">${formatAIResponse(response)}</div>`;
-}
-
 // ==================== EXCEL DOWNLOAD ====================
 
 function downloadExcel() {
@@ -289,27 +325,62 @@ function downloadExcel() {
     }
     
     const data = [];
+    const currentDate = new Date();
     
-    data.push(['FARM WISE WEATHER REPORT']);
+    // Title
+    data.push(['FARM WISE REPORT']);
     data.push(['']);
-    data.push(['Report Generated:', new Date().toLocaleString()]);
+    data.push(['Report Generated:', currentDate.toLocaleString()]);
     data.push(['']);
+    
+    // Query Section
     data.push(['QUERY', currentQuery]);
     data.push(['']);
     
-    data.push(['AGENT RESPONSE']);
+    // Response Section - Split into multiple rows
     if (currentAIResponse) {
-        const cleanResponse = currentAIResponse.replace(/\*\*(.*?)\*\*/g, '$1');
-        data.push([cleanResponse]);
+        // Clean markdown formatting
+        let cleanResponse = currentAIResponse
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/[•·-]\s/g, '• ');
+        
+        // Split response into lines (preserving natural line breaks)
+        let responseLines = [];
+        
+        // First, split by existing newlines
+        const paragraphs = cleanResponse.split('\n');
+        
+        for (let para of paragraphs) {
+            if (para.trim() === '') {
+                responseLines.push('');
+                continue;
+            }
+            
+            // Wrap long lines at 100-120 characters
+            const wrappedLines = wrapTextForExcel(para, 100, 120);
+            responseLines.push(...wrappedLines);
+        }
+        
+        // Add RESPONSE header in column A, first response line in column B
+        if (responseLines.length > 0) {
+            data.push(['RESPONSE', responseLines[0]]);
+            // Remaining response lines go in column B only (column A empty)
+            for (let i = 1; i < responseLines.length; i++) {
+                data.push(['', responseLines[i]]);
+            }
+        }
+        data.push(['']);
     }
-    data.push(['']);
     
-    if (currentWeatherData) {
+    // Weather Data Section (only if weather data exists)
+    if (currentWeatherData && currentWeatherData.forecast) {
+        // Location Information
         data.push(['LOCATION INFORMATION']);
         data.push(['Location:', currentWeatherData.location_name]);
         data.push(['Coordinates:', `${currentWeatherData.latitude}, ${currentWeatherData.longitude}`]);
         data.push(['']);
         
+        // Current Weather Conditions
         data.push(['CURRENT WEATHER CONDITIONS']);
         data.push(['Temperature:', `${currentWeatherData.current.temperature}°C`]);
         data.push(['Humidity:', `${currentWeatherData.current.humidity}%`]);
@@ -318,63 +389,67 @@ function downloadExcel() {
         data.push(['Condition:', currentWeatherData.current.weather_description]);
         data.push(['']);
         
+        // Forecast Data
         data.push(['FORECAST DATA']);
         data.push(['']);
         
+        // Week 1
         if (currentWeatherData.forecast[0] && currentWeatherData.forecast[0].days.length > 0) {
             const week1 = currentWeatherData.forecast[0];
             const startDate = new Date(week1.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const endDate = new Date(week1.days[week1.days.length - 1].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            data.push(['WEEK 1', `${startDate} - ${endDate}`]);
-            data.push(['Date', 'Max Temp', 'Min Temp', 'Precip', 'Wind', 'Condition']);
+            data.push([`WEEK 1 (${startDate} - ${endDate})`]);
+            data.push(['Date', 'Max Temp (°C)', 'Min Temp (°C)', 'Precipitation (mm)', 'Wind Speed (km/h)', 'Condition']);
             
             week1.days.forEach(day => {
                 data.push([
                     new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                    `${Math.round(day.temperature_max)}°C`,
-                    `${Math.round(day.temperature_min)}°C`,
-                    `${day.precipitation} mm`,
-                    `${Math.round(day.wind_speed)} km/h`,
+                    Math.round(day.temperature_max),
+                    Math.round(day.temperature_min),
+                    day.precipitation,
+                    Math.round(day.wind_speed),
                     day.weather_description
                 ]);
             });
             data.push(['']);
         }
         
+        // Week 2
         if (currentWeatherData.forecast[1] && currentWeatherData.forecast[1].days.length > 0) {
             const week2 = currentWeatherData.forecast[1];
             const startDate = new Date(week2.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const endDate = new Date(week2.days[week2.days.length - 1].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            data.push(['WEEK 2', `${startDate} - ${endDate}`]);
-            data.push(['Date', 'Max Temp', 'Min Temp', 'Precip', 'Wind', 'Condition']);
+            data.push([`WEEK 2 (${startDate} - ${endDate})`]);
+            data.push(['Date', 'Max Temp (°C)', 'Min Temp (°C)', 'Precipitation (mm)', 'Wind Speed (km/h)', 'Condition']);
             
             week2.days.forEach(day => {
                 data.push([
                     new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                    `${Math.round(day.temperature_max)}°C`,
-                    `${Math.round(day.temperature_min)}°C`,
-                    `${day.precipitation} mm`,
-                    `${Math.round(day.wind_speed)} km/h`,
+                    Math.round(day.temperature_max),
+                    Math.round(day.temperature_min),
+                    day.precipitation,
+                    Math.round(day.wind_speed),
                     day.weather_description
                 ]);
             });
             data.push(['']);
         }
         
+        // Week 3
         if (currentWeatherData.forecast[2] && currentWeatherData.forecast[2].days.length > 0) {
             const week3 = currentWeatherData.forecast[2];
             const startDate = new Date(week3.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             const endDate = new Date(week3.days[week3.days.length - 1].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            data.push(['WEEK 3', `${startDate} - ${endDate}`]);
-            data.push(['Date', 'Max Temp', 'Min Temp', 'Precip', 'Wind', 'Condition']);
+            data.push([`WEEK 3 (${startDate} - ${endDate})`]);
+            data.push(['Date', 'Max Temp (°C)', 'Min Temp (°C)', 'Precipitation (mm)', 'Wind Speed (km/h)', 'Condition']);
             
             week3.days.forEach(day => {
                 data.push([
                     new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-                    `${Math.round(day.temperature_max)}°C`,
-                    `${Math.round(day.temperature_min)}°C`,
-                    `${day.precipitation} mm`,
-                    `${Math.round(day.wind_speed)} km/h`,
+                    Math.round(day.temperature_max),
+                    Math.round(day.temperature_min),
+                    day.precipitation,
+                    Math.round(day.wind_speed),
                     day.weather_description
                 ]);
             });
@@ -382,18 +457,67 @@ function downloadExcel() {
         }
     }
     
+    // Footer
     data.push(['']);
     data.push(['Report generated by FarmWise AI']);
-    data.push([`Generated on: ${new Date().toLocaleString()}`]);
+    data.push([`Generated on: ${currentDate.toLocaleString()}`]);
     
+    // Create worksheet
     const ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{ wch: 28 }, { wch: 85 }];
+    
+    // Set column widths
+    ws['!cols'] = [
+        { wch: 25 },  // Column A (labels)
+        { wch: 85 }   // Column B (data)
+    ];
+    
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'FarmWise Report');
     
-    const date = new Date();
-    const fileName = `FarmWise_Report_${date.getFullYear()}${(date.getMonth() + 1).toString().padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}.xlsx`;
+    // Generate file name
+    const fileName = `FarmWise_Report_${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}_${currentDate.getHours().toString().padStart(2, '0')}${currentDate.getMinutes().toString().padStart(2, '0')}.xlsx`;
+    
     XLSX.writeFile(wb, fileName);
+}
+
+function wrapTextForExcel(text, minChars = 100, maxChars = 120) {
+    if (!text) return [];
+    
+    // Remove markdown formatting
+    let cleanText = text
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/[•·-]\s/g, '• ');
+    
+    const lines = [];
+    let remaining = cleanText;
+    
+    while (remaining.length > maxChars) {
+        let breakPoint = maxChars;
+        
+        // Find best break point at space, period, comma, etc.
+        for (let i = maxChars; i >= minChars; i--) {
+            const char = remaining[i];
+            if (char === ' ' || char === '.' || char === ',' || char === ';' || char === ':' || char === '?' || char === '!') {
+                breakPoint = i + 1;
+                break;
+            }
+        }
+        
+        // If no natural break found, break at maxChars
+        if (breakPoint === maxChars && remaining[maxChars] !== ' ') {
+            breakPoint = maxChars;
+        }
+        
+        const line = remaining.substring(0, breakPoint).trim();
+        if (line) lines.push(line);
+        remaining = remaining.substring(breakPoint).trim();
+    }
+    
+    if (remaining) {
+        lines.push(remaining);
+    }
+    
+    return lines;
 }
 
 // ==================== API CALL ====================
@@ -429,11 +553,21 @@ async function submitQuery() {
             currentAIResponse = data.response;
             
             if (data.data && data.data.forecast) {
+                // Weather response - show tiles (UNCHANGED)
                 currentWeatherData = data.data;
                 displayAIResponse(data.response);
                 displayWeather(data.data);
             } else {
-                displayAIResponse(data.response);
+                // Non-weather response - only show AI response with optional location
+                let locationData = null;
+                if (data.data && data.data.location) {
+                    locationData = {
+                        location_name: data.data.location,
+                        latitude: data.data.latitude,
+                        longitude: data.data.longitude
+                    };
+                }
+                displayAIResponse(data.response, locationData);
                 weatherDisplay.classList.add('hidden');
             }
             

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # Ollama Settings
     OLLAMA_MODEL: str = "llama3.2:1b"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    
+ 
     # Server Settings
     HOST: str = "0.0.0.0"
     PORT: int = 8000

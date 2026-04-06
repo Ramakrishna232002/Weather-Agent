@@ -47,6 +47,8 @@ async def process_query(request: QueryRequest):
         
         if location_match:
             location = location_match.group(1).strip()
+            location = re.sub(r'\s+(today|tomorrow|this week|next week|tonight)$', '', location)
+            location = location.strip()
             
             # Get coordinates for the location
             coordinates = await geocoding_service.get_coordinates(location)

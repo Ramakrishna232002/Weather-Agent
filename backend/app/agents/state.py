@@ -12,6 +12,14 @@ class SharedState(TypedDict):
     # Location
     location: Optional[str]
     coordinates: Optional[tuple]
+
+    # Season
+    current_season: Optional[str]
+    season_months: Optional[str]
+
+    # Crop Data
+    crop_data: Optional[List[Dict[str, Any]]]
+    crop_analysis: Optional[str]
     
     # Weather Data
     weather_data: Optional[Dict[str, Any]]

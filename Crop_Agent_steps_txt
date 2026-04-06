@@ -1,0 +1,136 @@
+# Weather Agent - Agent Addition Guide
+
+This document outlines all the changes made to add the Crop Agent to the system. Use this as a template for 
+adding new agents (Soil, Pest, General, etc.).
+
+## 1. Create New Agent File
+
+Location: backend/app/agents/crop/crop_agent.py
+
+## 2. Update SharedState
+
+Location: backend/app/agents/state.py
+
+class SharedState(TypedDict):
+    # ... existing fields ...
+    
+    # Season (for Crop Agent)
+    current_season: Optional[str]
+    season_months: Optional[str]
+    
+    # Crop Data
+    crop_data: Optional[List[Dict[str, Any]]]
+    crop_analysis: Optional[str]
+
+## 3. Update Supervisor
+Location: backend/app/Orchestration/supervisor.py
+
+Change 1: Add Crop Agent import at the top -> from app.agents.crop.crop_agent import CropAgent
+Change 2: Initialize Crop Agent in __init__ method
+def __init__(self):
+    self.llm = ChatOllama(
+        model=settings.OLLAMA_MODEL,
+        base_url=settings.OLLAMA_BASE_URL
+    )
+    self.weather_agent = WeatherAgent()
+    self.crop_agent = CropAgent()  # ← ADD THIS LINE
+    self.graph = self._build_graph()
+
+Change 3: Add crop_agent node in _build_graph method
+def _build_graph(self) -> StateGraph:
+    workflow = StateGraph(SharedState)
+    
+    workflow.add_node("classify_intent", self.classify_intent)
+    workflow.add_node("weather_agent", self.weather_agent.process)
+    workflow.add_node("crop_agent", self.crop_agent.process)  # ← ADD THIS LINE
+    workflow.add_node("generate_response", self.generate_response)
+    # ... rest of the code
+
+Change 4: Update conditional edges to include 'crop'
+workflow.add_conditional_edges(
+    "classify_intent",
+    self.route_to_agent,
+    {
+        "weather": "weather_agent",
+        "crop": "crop_agent",  # ← ADD THIS LINE
+        "unknown": "generate_response"
+    }
+)
+
+Change 5: Add edge from crop_agent to generate_response
+workflow.add_edge("weather_agent", "generate_response")
+workflow.add_edge("crop_agent", "generate_response")  # ← ADD THIS LINE
+workflow.add_edge("generate_response", END)
+
+Change 6: Update classify_intent method to detect crop queries
+async def classify_intent(self, state: SharedState) -> SharedState:
+    prompt = f"""Classify this query into one category: 'weather', 'crop', or 'unknown'
+
+Query: {state['user_query']}
+
+- 'weather': Questions about temperature, rain, wind, forecast, climate conditions
+- 'crop': Questions about farming, crops, what to grow/plant/cultivate, agriculture
+- 'unknown': Anything else
+
+Return only the category name without any quotes or extra characters."""
+    
+    response = await self.llm.ainvoke([("user", prompt)])
+    raw_intent = response.content.strip().lower()
+    raw_intent = raw_intent.strip(' .!?').strip()
+    state["intent"] = raw_intent
+    return state
+
+Change 7: Update route_to_agent method
+async def route_to_agent(self, state: SharedState) -> str:
+    intent = state.get("intent", "unknown")
+    if intent == "weather":
+        return "weather"
+    elif intent == "crop":  # ← ADD THIS BLOCK
+        return "crop"
+    return "unknown"
+
+Change 8: Update generate_response method to handle crop_analysis
+async def generate_response(self, state: SharedState) -> SharedState:
+    if state.get("error"):
+        state["final_response"] = f"Error: {state['error']}"
+    elif state.get("weather_analysis"):
+        state["final_response"] = state["weather_analysis"]
+    elif state.get("crop_analysis"):  # ← ADD THIS BLOCK
+        state["final_response"] = state["crop_analysis"]
+    else:
+        state["final_response"] = "I couldn't process your request."
+    return state
+
+Change 9: Update process method initial_state with new fields
+async def process(self, query: str) -> Dict[str, Any]:
+    initial_state: SharedState = {
+        "user_query": query,
+        "intent": None,
+        "location": None,
+        "coordinates": None,
+        "current_season": None,      # ← ADD THIS
+        "season_months": None,       # ← ADD THIS
+        "weather_data": None,
+        "weather_analysis": None,
+        "weather_recommendations": None,
+        "crop_data": None,           # ← ADD THIS
+        "crop_analysis": None,       # ← ADD THIS
+        "final_response": None,
+        "error": None,
+        "messages": [],
+        "current_agent": None,
+        "completed_agents": []
+    }
+    # ... rest of the code
+
+
+        modified:   backend/app/Orchestration/supervisor.py
+        modified:   backend/app/agents/state.py
+        modified:   backend/app/api/endpoints/query_endpoint.py
+        modified:   backend/app/core/config.py
+        modified:   frontend/src/main.js
+        modified:   frontend/src/style.css
+
+
+
+
