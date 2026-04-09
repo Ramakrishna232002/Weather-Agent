@@ -31,7 +31,6 @@ class CropAgent(BaseAgent):
     async def extract_location(self, state: SharedState) -> SharedState:
         query = state['user_query'].lower()
         
-        # Extract location using regex patterns
         patterns = [
             r'in\s+([a-z\s]+?)(?:\?|$|\.)',
             r'at\s+([a-z\s]+?)(?:\?|$|\.)',
@@ -49,16 +48,13 @@ class CropAgent(BaseAgent):
                 break
         
         if location:
-            # Clean and capitalize location name
             location = location.title()
         else:
-            # Fallback: try to get the last word before question mark or period
             words = query.replace('?', '').replace('.', '').split()
             if words:
                 location = words[-1].title()
         
         state["location"] = location if location else "Pune"
-        print(f"📍 Location extracted: {state['location']}")
         return state
     
     async def get_coordinates(self, state: SharedState) -> SharedState:
@@ -90,65 +86,33 @@ class CropAgent(BaseAgent):
         
         state["current_season"] = season
         state["season_months"] = months
-        print(f"📍 Season: {season}")
         return state
     
     async def generate_recommendations(self, state: SharedState) -> SharedState:
-        print("📍 Crop Agent: generate_recommendations called")
         if state.get("error"):
             state["crop_analysis"] = f"Error: {state['error']}"
             return state
         
         location = state["location"]
-        season = state.get("current_season", "")
-        months = state.get("season_months", "")
+        user_query = state['user_query']
         
-        prompt = f"""You are an expert agricultural advisor for Indian farming conditions.
+        prompt = f"""Answer this question as professional crop expert and focus on main things first: {user_query}
 
-LOCATION: {location}
-CURRENT SEASON: {season} ({months})
+Focus ONLY on the specific crop mentioned. Provide:
+- What the crop needs (best soil, water, climate)
+- Growing period
+- Best season
+- Expected yield
 
-Based on the climate, soil, and seasonal patterns of {location}, recommend the top 5 most suitable crops for the current {season} season.
-
-For EACH of the 5 crops, provide:
-
-• Common Name and Scientific Name
-• Growing Period (in days)
-• Best Season with sowing and harvest months
-• Suitable Soil Type
-• Water Requirement (Low/Moderate/High with mm range)
-• Expected Yield (quintals/hectare)
-
-Also write a 5-8 line professional, human-like introductory paragraph that:
-- Greets the user warmly
-- Explains the agricultural suitability of {location} for the current {season} season
-- Naturally mentions the 5 crops you are recommending
-- Provides practical, actionable advice
-
-FORMAT YOUR RESPONSE EXACTLY AS FOLLOWS (use plain text, no markdown):
-
-[Introductory paragraph here - 5 to 8 lines]
-
-CROP 1: [Common Name] ([Scientific Name])
-Growing Period: X-Y days
-Best Season: [Season] (Sow: Month, Harvest: Month)
-Soil Type: Description
-Water Requirement: Level (X-Y mm)
-Expected Yield: X-Y quintals/hectare
-
-CROP 2: [Common Name] ([Scientific Name])
-[Same format...]
-
-Continue for CROP 3, CROP 4, CROP 5
-
-Keep the response professional, informative, and farmer-friendly. Do not use any markdown like **bold** or *italics*. Use simple line breaks."""
+Keep response short and factual. 5-7 sentences only."""
         
         response = await self.llm.ainvoke([("user", prompt)])
         state["crop_analysis"] = response.content
         
         if "completed_agents" not in state:
             state["completed_agents"] = []
-        state["completed_agents"].append(self.name)
+        if "crop" not in state["completed_agents"]:
+            state["completed_agents"].append("crop")
         
         return state
     

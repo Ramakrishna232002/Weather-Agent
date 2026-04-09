@@ -656,3 +656,46 @@ body {
     padding-bottom: 4px;
     border-bottom: 1px solid #e0e7e0;
 }
+
+/* Streaming Toggle Button */
+.stream-btn {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 40px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+.stream-btn.active {
+    background: linear-gradient(135deg, #2d5a2c, #1e3a1e);
+    border-color: transparent;
+}
+
+.stream-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(45, 90, 44, 0.3);
+}
+
+/* Streaming Response Animation */
+.ai-response-text {
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

@@ -114,24 +114,16 @@ function showError(message) {
     setTimeout(() => errorMsg.classList.add('hidden'), 5000);
 }
 
-// ==================== IMPROVED AI RESPONSE FORMATTING ====================
+// ==================== AI RESPONSE FORMATTING ====================
 
 function formatAIResponse(text) {
     if (!text) return '';
     
     let formatted = text;
-    
-    // Convert **bold** to <strong>
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    
-    // Convert bullet points (• or - at start of line)
     formatted = formatted.replace(/^[•\-]\s+(.*?)$/gm, '<li>$1</li>');
     formatted = formatted.replace(/(<li>.*?<\/li>)/gs, '<ul>$1</ul>');
-    
-    // Convert CROP headings (doesn't affect weather responses)
     formatted = formatted.replace(/CROP \d+:/g, '<strong class="crop-heading">$&</strong>');
-    
-    // Convert line breaks
     formatted = formatted.replace(/\n/g, '<br>');
     
     return formatted;
@@ -140,7 +132,6 @@ function formatAIResponse(text) {
 function displayAIResponse(response, locationData = null) {
     let html = '';
     
-    // Show location card only if location data is provided (for non-weather responses)
     if (locationData && locationData.location_name) {
         html += `
             <div class="location-card">
@@ -153,14 +144,12 @@ function displayAIResponse(response, locationData = null) {
         `;
     }
     
-    // Format and show AI response
     const formattedResponse = formatAIResponse(response);
     html += `<div class="ai-response-text">${formattedResponse}</div>`;
-    
     responseArea.innerHTML = html;
 }
 
-// ==================== WEATHER FUNCTIONS (UNCHANGED) ====================
+// ==================== WEATHER FUNCTIONS ====================
 
 function getWeatherIcon(description) {
     const desc = description.toLowerCase();
@@ -245,11 +234,9 @@ function displayWeather(weatherData) {
                 <h2><i class="fas fa-map-marker-alt"></i> ${escapeHtml(location)}</h2>
                 <p class="coordinates">📍 Latitude: ${lat} | Longitude: ${lon}</p>
             </div>
-            
             <div class="metrics-title">
                 <h3><i class="fas fa-chart-line"></i> Today's Weather Metrics</h3>
             </div>
-            
             <div class="weather-metrics-grid">
                 <div class="metric-card">
                     <div class="metric-icon">🌡️</div>
@@ -278,7 +265,6 @@ function displayWeather(weatherData) {
                 </div>
             </div>
         </div>
-        
         <div class="forecast-block">
             <div class="week-tabs-container">
                 <div class="week-tabs" id="weekTabs">
@@ -327,27 +313,19 @@ function downloadExcel() {
     const data = [];
     const currentDate = new Date();
     
-    // Title
     data.push(['FARM WISE REPORT']);
     data.push(['']);
     data.push(['Report Generated:', currentDate.toLocaleString()]);
     data.push(['']);
-    
-    // Query Section
     data.push(['QUERY', currentQuery]);
     data.push(['']);
     
-    // Response Section - Split into multiple rows
     if (currentAIResponse) {
-        // Clean markdown formatting
         let cleanResponse = currentAIResponse
             .replace(/\*\*(.*?)\*\*/g, '$1')
             .replace(/[•·-]\s/g, '• ');
         
-        // Split response into lines (preserving natural line breaks)
         let responseLines = [];
-        
-        // First, split by existing newlines
         const paragraphs = cleanResponse.split('\n');
         
         for (let para of paragraphs) {
@@ -355,16 +333,12 @@ function downloadExcel() {
                 responseLines.push('');
                 continue;
             }
-            
-            // Wrap long lines at 100-120 characters
             const wrappedLines = wrapTextForExcel(para, 100, 120);
             responseLines.push(...wrappedLines);
         }
         
-        // Add RESPONSE header in column A, first response line in column B
         if (responseLines.length > 0) {
             data.push(['RESPONSE', responseLines[0]]);
-            // Remaining response lines go in column B only (column A empty)
             for (let i = 1; i < responseLines.length; i++) {
                 data.push(['', responseLines[i]]);
             }
@@ -372,15 +346,12 @@ function downloadExcel() {
         data.push(['']);
     }
     
-    // Weather Data Section (only if weather data exists)
     if (currentWeatherData && currentWeatherData.forecast) {
-        // Location Information
         data.push(['LOCATION INFORMATION']);
         data.push(['Location:', currentWeatherData.location_name]);
         data.push(['Coordinates:', `${currentWeatherData.latitude}, ${currentWeatherData.longitude}`]);
         data.push(['']);
         
-        // Current Weather Conditions
         data.push(['CURRENT WEATHER CONDITIONS']);
         data.push(['Temperature:', `${currentWeatherData.current.temperature}°C`]);
         data.push(['Humidity:', `${currentWeatherData.current.humidity}%`]);
@@ -389,11 +360,9 @@ function downloadExcel() {
         data.push(['Condition:', currentWeatherData.current.weather_description]);
         data.push(['']);
         
-        // Forecast Data
         data.push(['FORECAST DATA']);
         data.push(['']);
         
-        // Week 1
         if (currentWeatherData.forecast[0] && currentWeatherData.forecast[0].days.length > 0) {
             const week1 = currentWeatherData.forecast[0];
             const startDate = new Date(week1.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -414,7 +383,6 @@ function downloadExcel() {
             data.push(['']);
         }
         
-        // Week 2
         if (currentWeatherData.forecast[1] && currentWeatherData.forecast[1].days.length > 0) {
             const week2 = currentWeatherData.forecast[1];
             const startDate = new Date(week2.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -435,7 +403,6 @@ function downloadExcel() {
             data.push(['']);
         }
         
-        // Week 3
         if (currentWeatherData.forecast[2] && currentWeatherData.forecast[2].days.length > 0) {
             const week3 = currentWeatherData.forecast[2];
             const startDate = new Date(week3.days[0].date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -457,33 +424,22 @@ function downloadExcel() {
         }
     }
     
-    // Footer
     data.push(['']);
     data.push(['Report generated by FarmWise AI']);
     data.push([`Generated on: ${currentDate.toLocaleString()}`]);
     
-    // Create worksheet
     const ws = XLSX.utils.aoa_to_sheet(data);
-    
-    // Set column widths
-    ws['!cols'] = [
-        { wch: 25 },  // Column A (labels)
-        { wch: 85 }   // Column B (data)
-    ];
-    
+    ws['!cols'] = [{ wch: 25 }, { wch: 85 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'FarmWise Report');
     
-    // Generate file name
     const fileName = `FarmWise_Report_${currentDate.getFullYear()}${(currentDate.getMonth() + 1).toString().padStart(2, '0')}${currentDate.getDate().toString().padStart(2, '0')}_${currentDate.getHours().toString().padStart(2, '0')}${currentDate.getMinutes().toString().padStart(2, '0')}.xlsx`;
-    
     XLSX.writeFile(wb, fileName);
 }
 
 function wrapTextForExcel(text, minChars = 100, maxChars = 120) {
     if (!text) return [];
     
-    // Remove markdown formatting
     let cleanText = text
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/[•·-]\s/g, '• ');
@@ -493,8 +449,6 @@ function wrapTextForExcel(text, minChars = 100, maxChars = 120) {
     
     while (remaining.length > maxChars) {
         let breakPoint = maxChars;
-        
-        // Find best break point at space, period, comma, etc.
         for (let i = maxChars; i >= minChars; i--) {
             const char = remaining[i];
             if (char === ' ' || char === '.' || char === ',' || char === ';' || char === ':' || char === '?' || char === '!') {
@@ -502,21 +456,14 @@ function wrapTextForExcel(text, minChars = 100, maxChars = 120) {
                 break;
             }
         }
-        
-        // If no natural break found, break at maxChars
         if (breakPoint === maxChars && remaining[maxChars] !== ' ') {
             breakPoint = maxChars;
         }
-        
         const line = remaining.substring(0, breakPoint).trim();
         if (line) lines.push(line);
         remaining = remaining.substring(breakPoint).trim();
     }
-    
-    if (remaining) {
-        lines.push(remaining);
-    }
-    
+    if (remaining) lines.push(remaining);
     return lines;
 }
 
@@ -553,12 +500,10 @@ async function submitQuery() {
             currentAIResponse = data.response;
             
             if (data.data && data.data.forecast) {
-                // Weather response - show tiles (UNCHANGED)
                 currentWeatherData = data.data;
                 displayAIResponse(data.response);
                 displayWeather(data.data);
             } else {
-                // Non-weather response - only show AI response with optional location
                 let locationData = null;
                 if (data.data && data.data.location) {
                     locationData = {
@@ -580,7 +525,7 @@ async function submitQuery() {
         
     } catch (error) {
         showError('Unable to connect to server. Make sure backend is running at ' + API_URL);
-        responseArea.innerHTML = `<div class="greeting-message"><div class="greeting-icon">🔌</div><h3>Connection Error</h3><p>Cannot connect to the server. Please make sure the backend is running.</p></div>`;
+        responseArea.innerHTML = `<div class="greeting-message"><div class="greeting-icon">🔌</div><h3>Connection Error</h3><p>Cannot connect to the server.</p></div>`;
     } finally {
         showLoading(false);
     }

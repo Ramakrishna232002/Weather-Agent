@@ -1,0 +1,225 @@
+================================================================================
+                    SOIL AGENT - IMPLEMENTATION STEPS
+================================================================================
+
+This document outlines all changes made to add the Soil Agent to the system.
+The Soil Agent handles soil-related queries including soil types, characteristics,
+pH, nutrients, fertility, and soil recommendations for specific crops.
+
+================================================================================
+                           FILES CREATED
+================================================================================
+
+1. backend/app/agents/soil/soil_agent.py
+   - New file created for Soil Agent
+   - Handles soil analysis queries using LLM
+   - Extracts location, gets coordinates, analyzes soil
+   - Reads crop information from shared state for combined queries
+
+================================================================================
+                          FILES MODIFIED
+================================================================================
+
+1. backend/app/agents/state.py
+   - Added 'soil_analysis' field to SharedState
+
+2. backend/app/Orchestration/supervisor.py
+   - Added import for SoilAgent
+   - Initialized SoilAgent in __init__
+   - Added soil_agent node in _build_graph
+   - Updated conditional edges to include 'soil'
+   - Added edge from soil_agent to generate_response
+   - Updated classify_intent to detect soil keywords
+   - Updated route_to_agent to route to soil_agent
+   - Updated generate_response to handle soil_analysis
+   - Updated process initial_state to include soil_analysis
+   - Added soil keywords to plan_agents
+
+================================================================================
+                    DETAILED CHANGE LOG
+================================================================================
+
+-------------------- CHANGE 1: CREATE SOIL AGENT ---------------------------
+
+File: backend/app/agents/soil/soil_agent.py
+
+from typing import Dict, Any
+from langgraph.graph import StateGraph, END
+from app.agents.base.base_agent import BaseAgent
+from app.agents.state import SharedState
+from app.services.geocoding_service import GeocodingService
+
+class SoilAgent(BaseAgent):
+    def __init__(self):
+        super().__init__("SoilAgent")
+        self.geocoding_service = GeocodingService()
+        self.graph = self._build_graph()
+    
+    def _build_graph(self) -> StateGraph:
+        workflow = StateGraph(SharedState)
+        
+        workflow.add_node("extract_location", self.extract_location)
+        workflow.add_node("get_coordinates", self.get_coordinates)
+        workflow.add_node("analyze_soil", self.analyze_soil)
+        
+        workflow.set_entry_point("extract_location")
+        workflow.add_edge("extract_location", "get_coordinates")
+        workflow.add_edge("get_coordinates", "analyze_soil")
+        workflow.add_edge("analyze_soil", END)
+        
+        return workflow.compile()
+    
+    async def extract_location(self, state: SharedState) -> SharedState:
+        prompt = f"Extract the city/location name from this query. Return only the city name: {state['user_query']}"
+        response = await self.llm.ainvoke([("user", prompt)])
+        state["location"] = response.content.strip()
+        return state
+    
+    async def get_coordinates(self, state: SharedState) -> SharedState:
+        coords = await self.geocoding_service.get_coordinates(state["location"])
+        if coords:
+            state["coordinates"] = coords
+        else:
+            state["coordinates"] = None
+        return state
+    
+    async def analyze_soil(self, state: SharedState) -> SharedState:
+        
+        if state.get("error"):
+            state["soil_analysis"] = f"Error: {state['error']}"
+            return state
+        
+        location = state["location"]
+        user_query = state['user_query']
+        crop_info = state.get('crop_analysis', '')
+        
+        prompt = f"""Answer this question as professional soil expert and scientist and a well known experienced farmer and focus on main things first: {user_query}
+
+Crop needs: {crop_info if crop_info else 'General crop'}
+
+Focus ONLY on the query. Provide:
+- Correct soil type 
+- Correct soil properties
+- Correct soil information based on query
+
+Give specific soil recommendations for {location}. Be direct and practical. 4-6 sentences only."""
+        
+        response = await self.llm.ainvoke([("user", prompt)])
+        state["soil_analysis"] = response.content    
+        if "completed_agents" not in state:
+            state["completed_agents"] = []
+        if "soil" not in state["completed_agents"]:
+            state["completed_agents"].append("soil")
+        
+        return state
+    
+    async def process(self, state: SharedState) -> SharedState:
+        return await self.graph.ainvoke(state)
+
+
+-------------------- CHANGE 2: UPDATE SHARED STATE ----------------------------
+
+File: backend/app/agents/state.py
+
+Add this field to SharedState class:
+# Soil Data
+soil_analysis: Optional[str]
+
+-------------------- CHANGE 3: UPDATE SUPERVISOR IMPORTS ----------------------
+
+File: backend/app/Orchestration/supervisor.py
+from app.agents.soil.soil_agent import SoilAgent
+
+-------------------- CHANGE 4: INITIALIZE SOIL AGENT -------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+In init method, add:
+self.soil_agent = SoilAgent()
+
+-------------------- CHANGE 5: ADD SOIL AGENT NODE ---------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+In _build_graph method, add:
+workflow.add_node("soil_agent", self.soil_agent.process)
+
+-------------------- CHANGE 6: UPDATE CONDITIONAL EDGES -----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Update add_conditional_edges to include 'soil':
+
+workflow.add_conditional_edges(
+    "plan_agents",
+    self.get_next_agent,
+    {
+        "weather_agent": "weather_agent",
+        "crop_agent": "crop_agent",
+        "soil_agent": "soil_agent",
+        "general_agent": "general_agent",
+        "combine": "combine_responses"
+    }
+)
+
+
+-------------------- CHANGE 7: ADD EDGE FROM SOIL AGENT -----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add this edge:
+workflow.add_edge("soil_agent", "plan_agents")
+
+
+-------------------- CHANGE 8: UPDATE CLASSIFY INTENT -------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add soil_keywords to classify_intent:
+soil_keywords = ['soil', 'soil type', 'clay', 'loam', 'sandy', 'soil erosion', 
+                 'soil conservation', 'salinity', 'nutrients', 'fertility', 
+                 'organic matter', 'moisture', 'soil health', 'compaction', 
+                 'soil testing']
+
+
+-------------------- CHANGE 9: UPDATE PLAN AGENTS ----------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add soil_kw to plan_agents:
+soil_kw = ['soil', 'clay', 'loam', 'sandy', 'ph', 'nutrient', 'fertility', 
+           'organic', 'drainage', 'compost', 'manure']
+
+
+-------------------- CHANGE 10: UPDATE ROUTE TO AGENT ------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Update route_to_agent to include soil:
+async def route_to_agent(self, state: SharedState) -> str:
+    intent = state.get("intent", "general")
+    if intent == "weather":
+        return "weather"
+    elif intent == "crop":
+        return "crop"
+    elif intent == "soil":
+        return "soil"
+    return "general"
+
+
+
+-------------------- CHANGE 11: UPDATE GENERATE RESPONSE ----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Update generate_response to handle soil_analysis:
+elif state.get("soil_analysis"):
+    state["final_response"] = state["soil_analysis"]
+
+-------------------- CHANGE 12: UPDATE PROCESS INITIAL STATE -----------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add soil_analysis to initial_state:
+"soil_analysis": None,
+

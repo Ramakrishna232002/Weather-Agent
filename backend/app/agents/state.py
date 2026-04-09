@@ -25,6 +25,18 @@ class SharedState(TypedDict):
     weather_data: Optional[Dict[str, Any]]
     weather_analysis: Optional[str]
     weather_recommendations: Optional[List[str]]
+
+    #General
+    general_analysis: Optional[str]
+
+    # Soil Data
+    soil_analysis: Optional[str]
+    
+    # Multi-Agent Response
+    needed_agents: Optional[List[str]]
+    execution_order: Optional[List[str]]
+    current_agent_index: Optional[int]
+    combined_analysis: Optional[str]
     
     # Response
     final_response: Optional[str]

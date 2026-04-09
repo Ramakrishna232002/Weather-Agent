@@ -1,0 +1,229 @@
+================================================================================
+                    GENERAL AGENT - IMPLEMENTATION STEPS
+================================================================================
+
+This document outlines all changes made to add the General Agent to the system.
+The General Agent handles all non-weather, non-crop queries (general knowledge,
+facts, definitions, calculations, politics, history, science, etc.)
+
+================================================================================
+                           FILES CREATED
+================================================================================
+
+1. backend/app/agents/general/general_agent.py
+   - New file created for General Agent
+   - Handles general knowledge queries using LLM directly
+   - No external API calls, no location extraction, no season detection
+
+================================================================================
+                          FILES MODIFIED
+================================================================================
+
+1. backend/app/agents/state.py
+   - Added 'general_analysis' field to SharedState
+
+2. backend/app/Orchestration/supervisor.py
+   - Added import for GeneralAgent
+   - Initialized GeneralAgent in __init__ (BEFORE _build_graph)
+   - Added general_agent node in _build_graph
+   - Updated conditional edges to include 'general'
+   - Added edge from general_agent to generate_response
+   - Updated classify_intent to detect 'general' intent
+   - Updated route_to_agent to route to general_agent
+   - Updated generate_response to handle general_analysis
+   - Updated process initial_state to include general_analysis
+
+================================================================================
+                    DETAILED CHANGE LOG
+================================================================================
+
+-------------------- CHANGE 1: CREATE GENERAL AGENT ---------------------------
+
+File: backend/app/agents/general/general_agent.py
+
+```python
+from typing import Dict, Any
+from langgraph.graph import StateGraph, END
+from app.agents.base.base_agent import BaseAgent
+from app.agents.state import SharedState
+
+class GeneralAgent(BaseAgent):
+    def __init__(self):
+        super().__init__("GeneralAgent")
+        self.graph = self._build_graph()
+    
+    def _build_graph(self) -> StateGraph:
+        workflow = StateGraph(SharedState)
+        workflow.add_node("generate_response", self.generate_response)
+        workflow.set_entry_point("generate_response")
+        workflow.add_edge("generate_response", END)
+        return workflow.compile()
+    
+    async def generate_response(self, state: SharedState) -> SharedState:
+        query = state['user_query']
+        
+        prompt = f"""You are a helpful, knowledgeable assistant. Answer the following question in a clear, concise, and informative manner.
+
+Question: {query}
+
+Provide a well-structured response that is:
+- Accurate and factual
+- Easy to understand
+- Professional yet friendly
+- Include relevant details when appropriate
+
+Keep the response to 3-5 paragraphs maximum. Use plain text, no markdown formatting."""
+        
+        response = await self.llm.ainvoke([("user", prompt)])
+        state["general_analysis"] = response.content
+        
+        if "completed_agents" not in state:
+            state["completed_agents"] = []
+        state["completed_agents"].append(self.name)
+        
+        return state
+    
+    async def process(self, state: SharedState) -> SharedState:
+        return await self.graph.ainvoke(state)
+
+
+-------------------- CHANGE 2: UPDATE SHARED STATE ----------------------------
+
+File: backend/app/agents/state.py
+
+Add this field to SharedState class:
+# General Data
+general_analysis: Optional[str]
+
+-------------------- CHANGE 3: UPDATE SUPERVISOR IMPORTS ----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add this import:
+from app.agents.general.general_agent import GeneralAgent
+
+
+-------------------- CHANGE 4: INITIALIZE GENERAL AGENT -----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+In init method, add BEFORE self.graph = self._build_graph():
+self.general_agent = GeneralAgent()
+
+Complete init should look like:
+
+def __init__(self):
+    self.llm = ChatOllama(...)
+    self.weather_agent = WeatherAgent()
+    self.crop_agent = CropAgent()
+    self.general_agent = GeneralAgent()  # <-- ADD THIS LINE
+    self.graph = self._build_graph()
+
+
+-------------------- CHANGE 5: ADD GENERAL AGENT NODE -------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+In _build_graph method, add node:
+workflow.add_node("general_agent", self.general_agent.process)
+
+
+-------------------- CHANGE 6: UPDATE CONDITIONAL EDGES -----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Update add_conditional_edges to include 'general':
+workflow.add_conditional_edges(
+    "classify_intent",
+    self.route_to_agent,
+    {
+        "weather": "weather_agent",
+        "crop": "crop_agent",
+        "general": "general_agent",      # <-- ADD THIS LINE
+        "unknown": "generate_response"
+    }
+)
+
+-------------------- CHANGE 7: ADD EDGE FROM GENERAL AGENT --------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add this edge:
+
+workflow.add_edge("general_agent", "generate_response")
+
+-------------------- CHANGE 8: UPDATE CLASSIFY INTENT -------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Replace classify_intent method:
+
+async def classify_intent(self, state: SharedState) -> SharedState:
+    query = state['user_query'].lower()
+    weather_keywords = ['weather', 'temperature', 'rain', 'wind', 'forecast', 
+                        'climate', 'humidity', 'precipitation', 'sunny', 'cloudy', 'storm']
+    crop_keywords = ['crop', 'plant', 'grow', 'cultivate', 'farming', 'agriculture', 
+                     'sow', 'harvest', 'yield', 'season', 'soil', 'fertilizer', 'pesticide']
+    
+    if any(keyword in query for keyword in crop_keywords):
+        intent = "crop"
+    elif any(keyword in query for keyword in weather_keywords):
+        intent = "weather"
+    else:
+        intent = "general"      # <-- DEFAULT TO GENERAL
+    
+    state["intent"] = intent
+    return state
+
+
+-------------------- CHANGE 9: UPDATE ROUTE TO AGENT --------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Update route_to_agent method:
+
+async def route_to_agent(self, state: SharedState) -> str:
+    intent = state.get("intent", "general")
+    if intent == "weather":
+        return "weather"
+    elif intent == "crop":
+        return "crop"
+    return "general"      # <-- DEFAULT TO GENERAL
+
+
+-------------------- CHANGE 10: UPDATE GENERATE RESPONSE ----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Update generate_response to handle general_analysis:
+
+async def generate_response(self, state: SharedState) -> SharedState:
+    if state.get("error"):
+        state["final_response"] = f"Error: {state['error']}"
+    elif state.get("weather_analysis"):
+        state["final_response"] = state["weather_analysis"]
+    elif state.get("crop_analysis"):
+        state["final_response"] = state["crop_analysis"]
+    elif state.get("general_analysis"):      # <-- ADD THIS BLOCK
+        state["final_response"] = state["general_analysis"]
+    else:
+        state["final_response"] = "I couldn't process your request."
+    return state
+
+-------------------- CHANGE 11: UPDATE PROCESS INITIAL STATE ------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add general_analysis to initial_state:
+
+initial_state: SharedState = {
+    # ... existing fields ...
+    "general_analysis": None,      # <-- ADD THIS LINE
+    # ... remaining fields ...
+}
+
+TESTING COMMANDS -In terminal
+Test General Agent - Prime Minister
+curl -X POST http://localhost:8000/api/v1/query
+-H "Content-Type: application/json"
+-d '{"query": "Who is the Prime Minister of India?"}'

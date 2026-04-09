@@ -1,0 +1,291 @@
+================================================================================
+              MULTI-AGENT ORCHESTRATION - IMPLEMENTATION STEPS
+================================================================================
+
+This document outlines all changes made to implement multi-agent orchestration
+where agents can communicate with each other and share data through SharedState.
+
+================================================================================
+                          OVERVIEW
+================================================================================
+
+Before (Single Agent):
+User Query → Supervisor → One Agent → Response
+
+After (Multi-Agent):
+User Query → Supervisor → Plan Agents → Run Agents Sequentially → Combine → Response
+
+================================================================================
+                    AGENT EXECUTION ORDER
+================================================================================
+
+The system determines which agents to run based on query keywords:
+
+| Query Type | Agents Run | Order |
+|------------|------------|-------|
+| Weather only | Weather | weather |
+| Crop only | Crop | crop |
+| Soil only | Soil | soil |
+| General only | General | general |
+| Soil + Crop | Crop → Soil | crop → soil |
+| Weather + Crop | Weather → Crop | weather → crop |
+| Weather + Soil + Crop | Weather → Crop → Soil | weather → crop → soil |
+
+================================================================================
+                          FILES MODIFIED
+================================================================================
+
+1. backend/app/agents/state.py
+   - Added multi-agent tracking fields
+
+2. backend/app/agents/crop/crop_agent.py
+   - Added completion tracking
+
+3. backend/app/agents/soil/soil_agent.py
+   - Added completion tracking
+   - Added ability to read crop data from shared state
+
+4. backend/app/agents/weather/weather_agent.py
+   - Added completion tracking
+
+5. backend/app/agents/general/general_agent.py
+   - Added completion tracking
+
+6. backend/app/Orchestration/supervisor.py
+   - Added plan_agents method
+   - Added get_next_agent method
+   - Added combine_responses method
+   - Updated _build_graph for sequential execution
+   - Updated process initial_state
+
+================================================================================
+                    DETAILED CHANGE LOG
+================================================================================
+
+-------------------- CHANGE 1: UPDATE SHARED STATE ----------------------------
+
+File: backend/app/agents/state.py
+
+Add these fields to SharedState:
+
+```python
+# Multi-Agent Tracking
+needed_agents: Optional[List[str]]
+execution_order: Optional[List[str]]
+completed_agents: List[str]
+combined_analysis: Optional[str]
+
+
+-------------------- CHANGE 2: ADD COMPLETION TRACKING TO CROP AGENT -----------
+
+File: backend/app/agents/crop/crop_agent.py
+
+At the end of generate_recommendations method, add:
+
+if "completed_agents" not in state:
+    state["completed_agents"] = []
+if "crop" not in state["completed_agents"]:
+    state["completed_agents"].append("crop")
+
+
+-------------------- CHANGE 3: ADD COMPLETION TRACKING TO SOIL AGENT -----------
+
+File: backend/app/agents/soil/soil_agent.py
+
+At the end of analyze_soil method, add:
+
+if "completed_agents" not in state:
+    state["completed_agents"] = []
+if "soil" not in state["completed_agents"]:
+    state["completed_agents"].append("soil")
+
+
+-------------------- CHANGE 4: ADD COMPLETION TRACKING TO WEATHER AGENT -------
+
+File: backend/app/agents/weather/weather_agent.py
+
+At the end of analyze_weather method, add:
+
+if "completed_agents" not in state:
+    state["completed_agents"] = []
+if "weather" not in state["completed_agents"]:
+    state["completed_agents"].append("weather")
+
+
+-------------------- CHANGE 5: ADD COMPLETION TRACKING TO GENERAL AGENT -------
+
+File: backend/app/agents/general/general_agent.py
+
+At the end of generate_response method, add:
+if "completed_agents" not in state:
+    state["completed_agents"] = []
+if "general" not in state["completed_agents"]:
+    state["completed_agents"].append("general")
+
+
+-------------------- CHANGE 6: ADD PLAN_AGENTS METHOD -------------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add this new method:
+
+async def plan_agents(self, state: SharedState) -> SharedState:
+    """Determine which agents need to run and execution order"""
+    
+    # ONLY plan once - if already planned, just return
+    if state.get("needed_agents") is not None:
+        return state
+    
+    query = state['user_query'].lower()
+    
+    weather_kw = ['weather', 'temperature', 'rain', 'wind', 'forecast', 'climate', 'humidity']
+    crop_kw = ['crop', 'plant', 'grow', 'cultivate', 'farming', 'agriculture', 'sow', 'harvest', 'yield', 'season', 'wheat', 'rice', 'maize', 'corn', 'sorghum']
+    soil_kw = ['soil', 'clay', 'loam', 'sandy', 'ph', 'nutrient', 'fertility', 'organic', 'drainage', 'compost', 'manure']
+    
+    needed = []
+    
+    if any(k in query for k in weather_kw):
+        needed.append("weather")
+    if any(k in query for k in crop_kw):
+        needed.append("crop")
+    if any(k in query for k in soil_kw):
+        needed.append("soil")
+    
+    if not needed:
+        needed.append("general")
+    
+    # Execution order: weather → crop → soil → general
+    execution_order = []
+    if "weather" in needed:
+        execution_order.append("weather")
+    if "crop" in needed:
+        execution_order.append("crop")
+    if "soil" in needed:
+        execution_order.append("soil")
+    if "general" in needed:
+        execution_order.append("general")
+    
+    state["needed_agents"] = needed
+    state["execution_order"] = execution_order
+    state["completed_agents"] = []
+    return state
+
+-------------------- CHANGE 7: ADD GET_NEXT_AGENT METHOD -----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add this new method:
+
+def get_next_agent(self, state: SharedState) -> str:
+    """Get the next agent to run based on execution order"""
+    execution_order = state.get("execution_order", [])
+    completed_agents = state.get("completed_agents", [])
+    
+    for agent in execution_order:
+        if agent not in completed_agents:
+            return f"{agent}_agent"
+    return "combine"
+
+
+-------------------- CHANGE 8: ADD COMBINE_RESPONSES METHOD --------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add this new method:
+
+async def combine_responses(self, state: SharedState) -> SharedState:
+        """Combine outputs from all agents into a single AI response"""
+        user_query = state['user_query']
+        location = state.get('location', 'your area')
+        
+        crop_info = state.get('crop_analysis', '')
+        soil_info = state.get('soil_analysis', '')
+        weather_info = state.get('weather_analysis', '')
+        
+        prompt = f"""You are an expert agricultural advisor and a experienced scientist and a best weather,crop,soil knowledge farmer and best advisor for Indian farmers. Answer the following question in a helpful, professional, and interactive manner.
+
+QUESTION: {user_query}
+
+RELEVANT INFORMATION:
+Crop Information: {crop_info if crop_info else 'Not available'}
+Soil Information: {soil_info if soil_info else 'Not available'}
+Weather Information: {weather_info if weather_info else 'Not available'}
+
+INSTRUCTIONS:
+1. Answer the question directly and clearly and focus on the important part of solution as per requirement in the QUESTION
+2. Use a warm, professional and practical tone (like a friendly expert and best Advisor)
+3. Keep response to 3-4 paragraph professional and informative and mainly focus on solution for requested QUESTION
+4. Each paragraph should have 3-4 lines and You can use suitable emoji if required
+5. Include practical, professional ,actionable recommendations suggestions and key things to do
+6. Do NOT list multiple crops unless specifically asked and always avoid the useless crop/plant information like weeds, useless grass etc.
+7. Focus ONLY on answering the specific QUESTION from user and answer it more practicaly, expert and interactive way
+
+Write a natural, conversational response for {location}."""
+        
+        response = await self.llm.ainvoke([("user", prompt)])
+        state["combined_analysis"] = response.content
+        return state
+
+
+-------------------- CHANGE 9: UPDATE _BUILD_GRAPH METHOD ----------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Replace the entire _build_graph method:
+
+    def _build_graph(self) -> StateGraph:
+        workflow = StateGraph(SharedState)
+        
+        # Nodes
+        workflow.add_node("classify_intent", self.classify_intent)
+        workflow.add_node("plan_agents", self.plan_agents)
+        workflow.add_node("weather_agent", self.weather_agent.process)
+        workflow.add_node("crop_agent", self.crop_agent.process)
+        workflow.add_node("soil_agent", self.soil_agent.process)
+        workflow.add_node("general_agent", self.general_agent.process)
+        workflow.add_node("combine_responses", self.combine_responses)
+        workflow.add_node("generate_response", self.generate_response)
+
+        # Entry point
+        workflow.set_entry_point("classify_intent")
+        workflow.add_edge("classify_intent", "plan_agents")
+
+        # Conditional routing from plan_agents using get_next_agent
+        workflow.add_conditional_edges(
+            "plan_agents",
+            self.get_next_agent,
+            {
+                "weather_agent": "weather_agent",
+                "crop_agent": "crop_agent",
+                "soil_agent": "soil_agent",
+                "general_agent": "general_agent",
+                "combine": "combine_responses"
+            }
+        )
+        
+        # After each agent, go back to plan_agents to get next agent
+        workflow.add_edge("weather_agent", "plan_agents")
+        workflow.add_edge("crop_agent", "plan_agents")
+        workflow.add_edge("soil_agent", "plan_agents")
+        workflow.add_edge("general_agent", "plan_agents")
+        
+        # Final flow
+        workflow.add_edge("combine_responses", "generate_response")
+        workflow.add_edge("generate_response", END)
+        
+        return workflow.compile()
+
+-------------------- CHANGE 10: UPDATE PROCESS INITIAL STATE -------------------
+
+File: backend/app/Orchestration/supervisor.py
+
+Add new fields to initial_state:
+
+initial_state: SharedState = {
+    # ... existing fields ...
+    "needed_agents": None,
+    "execution_order": None,
+    "combined_analysis": None,
+    "completed_agents": []
+}
+

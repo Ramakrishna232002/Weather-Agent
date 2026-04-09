@@ -98,6 +98,13 @@ class WeatherAgent(BaseAgent):
         """
         response = await self.llm.ainvoke([("user", prompt)])
         state["weather_analysis"] = response.content
+        
+        if "completed_agents" not in state:
+            state["completed_agents"] = []
+        if "weather" not in state["completed_agents"]:
+            state["completed_agents"].append("weather")
+            print(f"✅ WeatherAgent completed")
+        
         return state
     
     async def process(self, state: SharedState) -> SharedState:
