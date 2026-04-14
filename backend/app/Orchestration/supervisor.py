@@ -7,6 +7,7 @@ from app.agents.weather.weather_agent import WeatherAgent
 from app.agents.crop.crop_agent import CropAgent
 from app.agents.general.general_agent import GeneralAgent
 from app.agents.soil.soil_agent import SoilAgent
+from app.agents.market.market_agent import MarketAgent
 from app.core.config import settings
 
 class Supervisor:
@@ -19,6 +20,7 @@ class Supervisor:
         self.crop_agent = CropAgent()
         self.general_agent = GeneralAgent()
         self.soil_agent = SoilAgent()
+        self.market_agent = MarketAgent()
         self.graph = self._build_graph()
     
     def _build_graph(self) -> StateGraph:
@@ -27,10 +29,11 @@ class Supervisor:
         # Nodes
         workflow.add_node("classify_intent", self.classify_intent)
         workflow.add_node("plan_agents", self.plan_agents)
-        workflow.add_node("weather_agent", self.weather_agent.process)
-        workflow.add_node("crop_agent", self.crop_agent.process)
-        workflow.add_node("soil_agent", self.soil_agent.process)
-        workflow.add_node("general_agent", self.general_agent.process)
+        workflow.add_node("weather_agent", self.run_weather_agent)
+        workflow.add_node("crop_agent", self.run_crop_agent)
+        workflow.add_node("soil_agent", self.run_soil_agent)
+        workflow.add_node("market_agent", self.run_market_agent)
+        workflow.add_node("general_agent", self.run_general_agent)
         workflow.add_node("combine_responses", self.combine_responses)
         workflow.add_node("generate_response", self.generate_response)
 
@@ -38,7 +41,7 @@ class Supervisor:
         workflow.set_entry_point("classify_intent")
         workflow.add_edge("classify_intent", "plan_agents")
 
-        # Conditional routing from plan_agents using get_next_agent
+        # Conditional routing
         workflow.add_conditional_edges(
             "plan_agents",
             self.get_next_agent,
@@ -46,15 +49,17 @@ class Supervisor:
                 "weather_agent": "weather_agent",
                 "crop_agent": "crop_agent",
                 "soil_agent": "soil_agent",
+                "market_agent": "market_agent",
                 "general_agent": "general_agent",
                 "combine": "combine_responses"
             }
         )
         
-        # After each agent, go back to plan_agents to get next agent
+        # After each agent, go back to plan_agents
         workflow.add_edge("weather_agent", "plan_agents")
         workflow.add_edge("crop_agent", "plan_agents")
         workflow.add_edge("soil_agent", "plan_agents")
+        workflow.add_edge("market_agent", "plan_agents")
         workflow.add_edge("general_agent", "plan_agents")
         
         # Final flow
@@ -63,14 +68,78 @@ class Supervisor:
         
         return workflow.compile()
     
+    async def run_weather_agent(self, state: SharedState) -> SharedState:
+        result = await self.weather_agent.process(state)
+        if "completed_agents" not in result:
+            result["completed_agents"] = []
+        if "weather" not in result["completed_agents"]:
+            result["completed_agents"].append("weather")
+        return result
+    
+    async def run_crop_agent(self, state: SharedState) -> SharedState:
+        result = await self.crop_agent.process(state)
+        if "completed_agents" not in result:
+            result["completed_agents"] = []
+        if "crop" not in result["completed_agents"]:
+            result["completed_agents"].append("crop")
+        return result
+    
+    async def run_soil_agent(self, state: SharedState) -> SharedState:
+        result = await self.soil_agent.process(state)
+        if "completed_agents" not in result:
+            result["completed_agents"] = []
+        if "soil" not in result["completed_agents"]:
+            result["completed_agents"].append("soil")
+        return result
+    
+    async def run_market_agent(self, state: SharedState) -> SharedState:
+        result = await self.market_agent.process(state)
+        if "completed_agents" not in result:
+            result["completed_agents"] = []
+        if "market" not in result["completed_agents"]:
+            result["completed_agents"].append("market")
+        print(f"✅ MarketAgent marked as completed")
+        return result
+    
+    async def run_general_agent(self, state: SharedState) -> SharedState:
+        result = await self.general_agent.process(state)
+        if "completed_agents" not in result:
+            result["completed_agents"] = []
+        if "general" not in result["completed_agents"]:
+            result["completed_agents"].append("general")
+        return result
+    
     async def classify_intent(self, state: SharedState) -> SharedState:
         query = state['user_query'].lower()
         
-        weather_keywords = ['weather', 'temperature', 'rain', 'wind', 'forecast', 'climate', 'humidity', 'precipitation', 'sunny', 'cloudy', 'storm']
-        crop_keywords = ['crop', 'plant', 'grow', 'cultivate', 'farming', 'agriculture', 'sow', 'harvest', 'yield', 'season']
-        soil_keywords = ['soil', 'soil type', 'clay', 'loam', 'sandy', 'soil erosion', 'soil conservation', 'salinity', 'nutrients', 'fertility', 'organic matter', 'moisture', 'soil health', 'compaction', 'soil testing']
+        # Price detection patterns
+        price_patterns = [
+            r'price\s+of\s+(\w+)',           
+            r'(\w+)\s+price',                 
+            r'rate\s+of\s+(\w+)',             
+            r'(\w+)\s+rate',                  
+            r'cost\s+of\s+(\w+)',             
+            r'(\w+)\s+cost',                  
+            r'(\w+)\s+ka\s+price',            
+            r'(\w+)\s+ke\s+rate',             
+            r'price\s+in\s+(\w+)',            
+            r'market\s+price',                
+            r'mandi\s+rate',                  
+            r'rate\s+in\s+(\w+)',             
+            r'(\w+)\s+per\s+kg',              
+            r'(\w+)\s+per\s+quintal',         
+        ]
         
-        if any(keyword in query for keyword in soil_keywords):
+        import re
+        is_price_query = any(re.search(pattern, query) for pattern in price_patterns)
+        
+        weather_keywords = ['weather', 'temperature', 'rain', 'wind', 'forecast', 'climate', 'humidity']
+        crop_keywords = ['crop', 'plant', 'grow', 'cultivate', 'farming', 'agriculture', 'sow', 'harvest', 'yield', 'season']
+        soil_keywords = ['soil', 'clay', 'loam', 'sandy', 'ph', 'nutrient', 'fertility', 'organic']
+        
+        if is_price_query:
+            intent = "market"
+        elif any(keyword in query for keyword in soil_keywords):
             intent = "soil"
         elif any(keyword in query for keyword in crop_keywords):
             intent = "crop"
@@ -84,33 +153,37 @@ class Supervisor:
         return state
 
     async def plan_agents(self, state: SharedState) -> SharedState:
-        """Determine which agents need to run and execution order"""
-        
-        # ONLY plan once 
+        # Only plan once
         if state.get("needed_agents") is not None:
             print(f"📋 Already planned. Needed: {state.get('needed_agents')}")
             print(f"📋 Completed: {state.get('completed_agents')}")
             return state
         
         query = state['user_query'].lower()
-        
-        weather_kw = ['weather', 'temperature', 'rain', 'wind', 'forecast', 'climate', 'humidity']
-        crop_kw = ['crop', 'plant', 'grow', 'cultivate', 'farming', 'agriculture', 'sow', 'harvest', 'yield', 'season', 'wheat', 'rice', 'maize', 'corn', 'sorghum']
-        soil_kw = ['soil', 'clay', 'loam', 'sandy', 'ph', 'nutrient', 'fertility', 'organic', 'drainage', 'compost', 'manure']
+        intent = state.get("intent", "general")
         
         needed = []
         
+        # Add agents based on intent and keywords
+        if intent == "market":
+            needed.append("market")
+        
+        weather_kw = ['weather', 'temperature', 'rain', 'wind', 'forecast', 'climate', 'humidity']
         if any(k in query for k in weather_kw):
             needed.append("weather")
+        
+        crop_kw = ['crop', 'plant', 'grow', 'cultivate', 'farming', 'agriculture', 'sow', 'harvest', 'yield', 'season']
         if any(k in query for k in crop_kw):
             needed.append("crop")
+        
+        soil_kw = ['soil', 'clay', 'loam', 'sandy', 'ph', 'nutrient', 'fertility', 'organic']
         if any(k in query for k in soil_kw):
             needed.append("soil")
         
         if not needed:
             needed.append("general")
         
-        # Execution order: weather → crop → soil → general
+        # Execution order: weather, crop, soil, market, general
         execution_order = []
         if "weather" in needed:
             execution_order.append("weather")
@@ -118,12 +191,14 @@ class Supervisor:
             execution_order.append("crop")
         if "soil" in needed:
             execution_order.append("soil")
+        if "market" in needed:
+            execution_order.append("market")
         if "general" in needed:
             execution_order.append("general")
         
         state["needed_agents"] = needed
         state["execution_order"] = execution_order
-        state["completed_agents"] = []  
+        state["completed_agents"] = []
         
         print(f"📋 Needed Agents: {needed}")
         print(f"📋 Execution Order: {execution_order}")
@@ -147,29 +222,31 @@ class Supervisor:
         user_query = state['user_query']
         location = state.get('location', 'your area')
         
+        # Get all agent analyses
+        weather_info = state.get('weather_analysis', '')
         crop_info = state.get('crop_analysis', '')
         soil_info = state.get('soil_analysis', '')
-        weather_info = state.get('weather_analysis', '')
+        market_info = state.get('market_analysis', '')
+        general_info = state.get('general_analysis', '')
         
-        prompt = f"""You are an expert agricultural advisor and a experienced scientist and a best weather,crop,soil knowledge farmer and best advisor for Indian farmers. Answer the following question in a helpful, professional, and interactive manner.
+        # Prioritize market response if it exists
+        if market_info and ("price" in user_query.lower() or "rate" in user_query.lower() or "cost" in user_query.lower()):
+            state["combined_analysis"] = market_info
+            return state
+        
+        # Otherwise combine all responses
+        prompt = f"""You are an expert agricultural advisor. Answer the following question:
 
 QUESTION: {user_query}
 
 RELEVANT INFORMATION:
+Weather Information: {weather_info if weather_info else 'Not available'}
 Crop Information: {crop_info if crop_info else 'Not available'}
 Soil Information: {soil_info if soil_info else 'Not available'}
-Weather Information: {weather_info if weather_info else 'Not available'}
+Market Information: {market_info if market_info else 'Not available'}
+General Information: {general_info if general_info else 'Not available'}
 
-INSTRUCTIONS:
-1. Answer the question directly and clearly and focus on the important part of solution as per requirement in the QUESTION
-2. Use a warm, professional and practical tone (like a friendly expert and best Advisor)
-3. Keep response to 3-4 paragraph professional and informative and mainly focus on solution for requested QUESTION
-4. Each paragraph should have 3-4 lines and You can use suitable emoji if required
-5. Include practical, professional ,actionable recommendations suggestions and key things to do
-6. Do NOT list multiple crops unless specifically asked and always avoid the useless crop/plant information like weeds, useless grass etc.
-7. Focus ONLY on answering the specific QUESTION from user and answer it more practicaly, expert and interactive way
-
-Write a natural, conversational response for {location}."""
+Provide a helpful, professional response for {location}."""
         
         response = await self.llm.ainvoke([("user", prompt)])
         state["combined_analysis"] = response.content
@@ -180,6 +257,8 @@ Write a natural, conversational response for {location}."""
             state["final_response"] = f"Error: {state['error']}"
         elif state.get("combined_analysis"):
             state["final_response"] = state["combined_analysis"]
+        elif state.get("market_analysis"):
+            state["final_response"] = state["market_analysis"]
         elif state.get("weather_analysis"):
             state["final_response"] = state["weather_analysis"]
         elif state.get("crop_analysis"):
@@ -190,6 +269,7 @@ Write a natural, conversational response for {location}."""
             state["final_response"] = state["general_analysis"]
         else:
             state["final_response"] = "I couldn't process your request. Please try again."
+        
         return state
     
     async def process(self, query: str) -> Dict[str, Any]:
@@ -214,7 +294,12 @@ Write a natural, conversational response for {location}."""
             "needed_agents": None,
             "execution_order": None,
             "combined_analysis": None,
-            "completed_agents": []
+            "completed_agents": [],
+            "commodity": None,
+            "city": None,
+            "state": None,
+            "market_price_data": None,
+            "market_analysis": None
         }
         
         final_state = await self.graph.ainvoke(initial_state)
@@ -222,10 +307,12 @@ Write a natural, conversational response for {location}."""
         return {
             "success": final_state.get("error") is None,
             "response": final_state.get("final_response"),
+            "intent": final_state.get("intent"),
             "data": {
                 "weather": final_state.get("weather_data"),
                 "weather_analysis": final_state.get("weather_analysis"),
-                "weather_recommendations": final_state.get("weather_recommendations")
+                "market_data": final_state.get("market_price_data"),
+                "market_analysis": final_state.get("market_analysis")
             },
             "error": final_state.get("error")
         }

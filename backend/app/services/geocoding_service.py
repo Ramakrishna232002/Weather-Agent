@@ -1,84 +1,62 @@
 import httpx
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 
 class GeocodingService:
     def __init__(self):
-        # Open-Meteo Geocoding API endpoint
-        self.geocoding_url = "https://geocoding-api.open-meteo.com/v1/search"
+        self.base_url = "https://nominatim.openstreetmap.org"
     
-    async def get_coordinates(self, location_name: str) -> Optional[Tuple[float, float]]:
-        """
-        Convert location name to coordinates (latitude, longitude)
-        
-        Args:
-            location_name: City name (e.g., "Pune", "New York", "London")
-            
-        Returns:
-            Tuple of (latitude, longitude) or None if not found
-        """
-        params = {
-            "name": location_name,
-            "count": 1,  
-            "language": "en",
-            "format": "json"
-        }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(self.geocoding_url, params=params)
-                response.raise_for_status()
-                data = response.json()
+    async def get_coordinates(self, location: str) -> Optional[Tuple[float, float]]:
+        """Get latitude and longitude for a location name"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/search",
+                    params={
+                        "q": location,
+                        "format": "json",
+                        "limit": 1
+                    },
+                    headers={"User-Agent": "WeatherAgent/1.0"}
+                )
                 
-                # Check if we got any results
-                if data and "results" in data and len(data["results"]) > 0:
-                    # Get the first (best) match
-                    result = data["results"][0]
-                    latitude = result["latitude"]
-                    longitude = result["longitude"]
-                    return (latitude, longitude)
-                else:
-                    return None
-                    
-            except Exception as e:
-                print(f"Geocoding error for {location_name}: {e}")
+                if response.status_code == 200:
+                    data = response.json()
+                    if data:
+                        lat = float(data[0]["lat"])
+                        lon = float(data[0]["lon"])
+                        return (lat, lon)
+                
                 return None
+                
+        except Exception as e:
+            print(f"Geocoding error for {location}: {e}")
+            return None
     
-    async def search_locations(self, query: str) -> List[dict]:
-        """
-        Search for locations and return all matches
-        
-        Args:
-            query: Search term (e.g., "Pune")
-            
-        Returns:
-            List of location dictionaries with name, country, coordinates
-        """
-        params = {
-            "name": query,
-            "count": 5,
-            "language": "en",
-            "format": "json"
-        }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(self.geocoding_url, params=params)
-                response.raise_for_status()
-                data = response.json()
+    async def get_state_from_coordinates(self, lat: float, lon: float) -> Optional[str]:
+        """Get state name from coordinates using reverse geocoding"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/reverse",
+                    params={
+                        "lat": lat,
+                        "lon": lon,
+                        "format": "json",
+                        "addressdetails": 1
+                    },
+                    headers={"User-Agent": "WeatherAgent/1.0"}
+                )
                 
-                if data and "results" in data:
-                    results = []
-                    for result in data["results"]:
-                        results.append({
-                            "name": result.get("name", ""),
-                            "country": result.get("country", ""),
-                            "admin1": result.get("admin1", ""),  # State/Province
-                            "latitude": result.get("latitude"),
-                            "longitude": result.get("longitude")
-                        })
-                    return results
-                return []
+                if response.status_code == 200:
+                    data = response.json()
+                    address = data.get("address", {})
+                    # Try to get state from different possible fields
+                    state = address.get("state") or address.get("region") or address.get("province") or address.get("state_district")
+                    if state:
+                        return state
                 
-            except Exception as e:
-                print(f"Location search error: {e}")
-                return []
+                return None
+                
+        except Exception as e:
+            print(f"Reverse geocoding error: {e}")
+            return None

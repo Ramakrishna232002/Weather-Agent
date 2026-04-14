@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     # Ollama Settings
     OLLAMA_MODEL: str = "llama3.2:1b"
     OLLAMA_BASE_URL: str = "http://localhost:11434"
+
+    MARKET_API_URL: str = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
+    MARKET_API_KEY: str = "579b464db66ec23bdd00000121140f34e78442bc7a6300bc6632847f"
  
     # Server Settings
     HOST: str = "0.0.0.0"

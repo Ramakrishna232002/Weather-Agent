@@ -1,0 +1,174 @@
+================================================================================
+                    MARKET AGENT - IMPLEMENTATION STEPS
+================================================================================
+
+This document outlines all changes made to add the Market Agent to the system.
+The Market Agent handles commodity price queries including price of cotton, wheat,
+tomato, etc. It extracts commodity and location, fetches prices from API, and
+provides intelligent market analysis using LLM.
+
+================================================================================
+                           FILES CREATED
+================================================================================
+
+1. backend/app/agents/market/market_agent.py
+   - New file created for Market Agent
+   - Handles price-related queries using LLM
+   - Extracts commodity and city from user query
+   - Gets state from city using geocoding service
+   - Fetches price data from market API
+   - Generates intelligent market analysis with recommendations
+
+2. backend/app/services/market_service.py
+   - New file created for Market Service
+   - Fetches commodity price data from external API
+   - Handles API authentication and data cleaning
+   - Converts prices from per quintal to per kg
+   - Provides location-based filtering (city/state)
+
+================================================================================
+                          FILES MODIFIED
+================================================================================
+
+1. backend/app/agents/state.py
+   - Added market-related fields to SharedState
+
+2. backend/app/Orchestration/supervisor.py
+   - Added import for MarketAgent
+   - Initialized MarketAgent in __init__
+   - Added market_agent node in _build_graph
+   - Added wrapper method run_market_agent for completion tracking
+   - Updated conditional edges to include 'market_agent'
+   - Added edge from market_agent to plan_agents
+   - Updated classify_intent to detect price queries
+   - Updated plan_agents to include market in execution order
+   - Updated combine_responses to prioritize market responses
+   - Updated generate_response to handle market_analysis
+   - Updated process initial_state to include market fields
+
+3. backend/app/services/geocoding_service.py
+   - Added get_state_from_coordinates method for reverse geocoding
+
+4. backend/app/core/config.py
+   - Added MARKET_API_URL and MARKET_API_KEY settings
+
+5. backend/.env
+   - Added MARKET_API_URL and MARKET_API_KEY environment variables
+
+================================================================================
+                    DETAILED CHANGE LOG
+================================================================================
+
+-------------------- CHANGE 1: CREATE MARKET SERVICE --------------------------
+
+File: backend/app/services/market_service.py
+
+```python
+import httpx
+from typing import Dict, Any, Optional, List
+from app.core.config import settings
+
+class MarketService:
+    def __init__(self):
+        self.base_url = settings.MARKET_API_URL
+        self.api_key = settings.MARKET_API_KEY
+
+    async def get_commodity_price(
+        self,
+        commodity: str,
+        state: Optional[str] = None,
+        limit: int = 1000
+    ) -> List[Dict[str, Any]]:
+
+        params = {
+            "api-key": self.api_key,
+            "format": "json",
+            "limit": limit
+        }
+
+        if commodity:
+            params["filters%5Bcommodity%5D"] = commodity
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(self.base_url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+        records = data.get("records", [])
+
+        # Dynamic filtering
+        if commodity:
+            records = [
+                r for r in records
+                if commodity.lower() in r.get("commodity", "").lower()
+            ]
+
+        if state:
+            records = [
+                r for r in records
+                if state.lower() in r.get("state", "").lower()
+            ]
+
+        cleaned = []
+        for r in records:
+            modal = r.get("modal_price")
+
+            if not modal or modal <= 0:
+                continue
+
+            # Convert per quintal to per kg
+            price_per_kg = round(modal / 100, 2)
+
+            r["modal_price_kg"] = price_per_kg
+            r["price_unit"] = "kg"
+
+            cleaned.append(r)
+
+        return cleaned
+
+    async def get_price_for_location(
+        self,
+        commodity: str,
+        city: str,
+        state: Optional[str],
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+
+        all_data = await self.get_commodity_price(
+            commodity=commodity,
+            state=state
+        )
+
+        if not all_data:
+            return []
+
+        city_lower = city.lower() if city else ""
+
+        # 1. District match (exact city)
+        district_data = [
+            r for r in all_data
+            if city_lower in r.get("district", "").lower()
+        ]
+
+        if district_data:
+            for r in district_data:
+                r["data_source"] = "district"
+            return district_data[:limit]
+
+        # 2. State fallback (nearby locations)
+        if state:
+            state_data = [
+                r for r in all_data
+                if state.lower() in r.get("state", "").lower()
+            ]
+
+            if state_data:
+                for r in state_data:
+                    r["data_source"] = "state"
+                return state_data[:limit]
+
+        # 3. Final fallback
+        for r in all_data:
+            r["data_source"] = "fallback"
+
+        return all_data[:limit]

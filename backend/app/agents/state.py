@@ -37,6 +37,14 @@ class SharedState(TypedDict):
     execution_order: Optional[List[str]]
     current_agent_index: Optional[int]
     combined_analysis: Optional[str]
+
+  
+    # Market Data
+    commodity: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    market_price_data: Optional[List[Dict[str, Any]]]
+    market_analysis: Optional[str]
     
     # Response
     final_response: Optional[str]

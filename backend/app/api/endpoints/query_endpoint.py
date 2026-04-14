@@ -19,6 +19,7 @@ class QueryResponse(BaseModel):
     response: str
     data: Optional[Any] = None
     error: Optional[str] = None
+    intent: Optional[str] = None
 
 @router.post("", response_model=QueryResponse)
 @router.post("/", response_model=QueryResponse)
@@ -36,7 +37,8 @@ async def process_query(request: QueryRequest):
                 success=False,
                 response="",
                 data=None,
-                error=result.get("error", "Failed to process query")
+                error=result.get("error", "Failed to process query"),
+                intent=None
             )
         
         # Step 2: Try to get weather data if it's a weather-related query
@@ -71,7 +73,8 @@ async def process_query(request: QueryRequest):
             success=True,
             response=result["response"],
             data=weather_data.dict() if weather_data else None,
-            error=None
+            error=None,
+            intent=result.get("intent")
         )
         
     except Exception as e:
